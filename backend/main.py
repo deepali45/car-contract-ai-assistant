@@ -24,7 +24,7 @@ import re # Needed for regex
 # - http://127.0.0.1:PORT
 # where PORT is any sequence of digits.
 # Note: For production, this should be narrowed down to specific trusted origins.
-frontend_origins_regex = r"https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?"
+frontend_origins_regex = r"https?:\/\/(localhost|127\.0\.0\.1|autofinance-guardian\.web\.app)(:\d+)?"
 
 app.add_middleware(
     CORSMiddleware,

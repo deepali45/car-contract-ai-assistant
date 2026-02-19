@@ -2,7 +2,7 @@
 
 AutoFinance Guardian is a comprehensive full-stack application designed to assist users in navigating the complexities of auto financing. It provides tools for contract analysis, market data insights, negotiation support, and VIN lookup, all accessible through a user-friendly Flutter mobile application and powered by a robust Python backend.
 
-✨ Features
+✨ Project Functionality and Implemented Features
 
 📄 Contract Analysis: Upload and analyze loan or lease contracts to identify key terms, potential pitfalls, and areas for negotiation.
 
@@ -15,6 +15,10 @@ AutoFinance Guardian is a comprehensive full-stack application designed to assis
 🔐 User Management: Secure user authentication and management for personalized experiences.
 
 🗄️ Database Management: Robust data persistence using SQLAlchemy and Alembic for migrations.
+
+🚀 Deployment
+
+The AutoFinance Guardian project is deployed and accessible at: **[Deployment Link Placeholder]**
 
 🛠️ Technologies Used
 🔙 Backend
