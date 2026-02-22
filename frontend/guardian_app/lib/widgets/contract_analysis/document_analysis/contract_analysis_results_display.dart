@@ -230,7 +230,7 @@ class ContractAnalysisResultsDisplay extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+              color: Theme.of(context).colorScheme.surface.withOpacity(0.1),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(summary, style: Theme.of(context).textTheme.bodyLarge),
