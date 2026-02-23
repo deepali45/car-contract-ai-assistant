@@ -5,12 +5,9 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../core/config.dart';
-import 'api_service.dart'; // Reusing the existing ApiService
+import 'api_service.dart';
+import 'web_download_helper.dart'; // Using conditional import helper
 
-// Conditional import for web download
-import 'dart:html' as html;
-
-/// Represents the structured result of a contract document analysis.
 class DocumentContractAnalysisResult {
   final String fileName;
   final String riskLevel;
@@ -40,121 +37,84 @@ class DocumentContractAnalysisResult {
   }
 }
 
-/// Service for handling contract document uploads and their AI analysis.
 class ContractAnalysisService {
-  final ApiService _apiService; // Can be used for other API calls if needed
+  final ApiService _apiService;
 
   ContractAnalysisService(this._apiService);
 
-  /// Uploads a contract document for AI analysis and returns the structured result.
   Future<DocumentContractAnalysisResult> analyzeContract({
     required String fileName,
     required Uint8List fileBytes,
   }) async {
-    final uri = Uri.parse('${AppConfig.baseUrl}/analyze_contract'); // Backend endpoint
+    final uri = Uri.parse('${AppConfig.baseUrl}/analyze_contract');
     
-    // Helper function for the actual request to support retries
     Future<http.StreamedResponse> sendRequest() async {
       var request = http.MultipartRequest('POST', uri)
         ..files.add(http.MultipartFile.fromBytes(
-          'file', // Field name for the file on the backend
+          'file',
           fileBytes,
           filename: fileName,
         ));
-      // Increase timeout to 120 seconds for long processing
-      return await request.send().timeout(const Duration(seconds: 120));
+      
+      // Ensure headers are set if needed for production
+      request.headers.addAll({
+        'Accept': 'application/json',
+      });
+
+      return await request.send().timeout(AppConfig.timeoutDuration);
     }
 
     int retryCount = 0;
-    const int maxRetries = 1;
 
     while (true) {
       try {
         if (kDebugMode) {
-          print('Attempting to upload contract for analysis (Attempt ${retryCount + 1}): $fileName to $uri');
+          print('Uploading to $uri (Attempt ${retryCount + 1})');
         }
         
         final response = await sendRequest();
 
         if (response.statusCode >= 200 && response.statusCode < 300) {
           final responseBody = await response.stream.bytesToString();
-          if (kDebugMode) {
-            print('Contract analysis upload successful. Response body: $responseBody');
-          }
-
-          if (responseBody.isNotEmpty) {
-            try {
-              final jsonResponse = json.decode(responseBody);
-              return DocumentContractAnalysisResult.fromJson(jsonResponse);
-            } catch (e) {
-              if (kDebugMode) {
-                print('Failed to parse contract analysis response JSON: $e');
-              }
-              return DocumentContractAnalysisResult(
-                  fileName: fileName,
-                  riskLevel: 'Error',
-                  summary: 'Failed to parse analysis: $responseBody');
-            }
-          }
-          return DocumentContractAnalysisResult(fileName: fileName, summary: 'No analysis content received.');
+          final jsonResponse = json.decode(responseBody);
+          return DocumentContractAnalysisResult.fromJson(jsonResponse);
         } else {
           final errorBody = await response.stream.bytesToString();
-          if (kDebugMode) {
-            print('Server returned error: ${response.statusCode} - $errorBody');
-          }
-          throw ApiException('Failed to analyze contract. Status: ${response.statusCode}', statusCode: response.statusCode);
+          throw ApiException('Server error (${response.statusCode}): $errorBody', statusCode: response.statusCode);
         }
       } catch (e) {
-        if (retryCount < maxRetries && (e is TimeoutException || e is http.ClientException)) {
+        if (retryCount < AppConfig.retryCount && (e is TimeoutException || e is http.ClientException)) {
           retryCount++;
-          if (kDebugMode) {
-            print('Retrying contract analysis due to error: $e. Attempt $retryCount');
-          }
-          await Future.delayed(const Duration(seconds: 2));
+          await Future.delayed(AppConfig.retryDelay);
           continue;
         }
         
-        if (kDebugMode) {
-          print('Contract Analysis Service Error: $e');
-        }
         if (e is TimeoutException) {
-          throw ApiException('Analysis request timed out after 120 seconds. Please try again.');
+          throw ApiException('Analysis request timed out. The server might be busy or starting up.');
         }
-        throw ApiException('An unexpected error occurred during contract analysis: ${e.toString()}');
+        throw ApiException('Network error: ${e.toString()}');
       }
     }
   }
 
-  /// Downloads the contract analysis as a text file.
   Future<void> downloadAnalysis(DocumentContractAnalysisResult result) async {
+    // Encode query parameters properly for the GET request
     final queryParams = {
       'risk_level': result.riskLevel,
       'summary': result.summary,
+      'penalties': result.penalties.join('\n'),
     };
     
-    // Construct URI with encoded query parameters
     final uri = Uri.parse('${AppConfig.baseUrl}/download-analysis').replace(queryParameters: queryParams);
 
-    if (kIsWeb) {
-      try {
-        if (kDebugMode) {
-          print('Triggering web download for analysis: $uri');
-        }
-        // Using anchor element for download. 
-        // Backend sends Content-Disposition: attachment to force download.
-        html.AnchorElement(href: uri.toString())
-          ..setAttribute("download", "Contract_Analysis.txt")
-          ..click();
-      } catch (e) {
-        if (kDebugMode) {
-          print('Web download failed: $e');
-        }
-        throw ApiException('Failed to trigger download: $e');
-      }
-    } else {
+    try {
       if (kDebugMode) {
-        print('Download triggered for non-web (URL only): $uri');
+        print('Triggering PDF download: $uri');
       }
+      // Use the web-safe conditional download helper
+      downloadFile(uri.toString(), 'Contract_Analysis.pdf');
+    } catch (e) {
+      throw ApiException('Failed to start download: $e');
     }
   }
 }
