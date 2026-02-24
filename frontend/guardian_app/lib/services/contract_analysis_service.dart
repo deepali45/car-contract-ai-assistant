@@ -4,9 +4,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../core/config.dart';
 import 'api_service.dart';
-import 'web_download_helper.dart'; // Using conditional import helper
+import 'web_download_helper.dart';
 
 class DocumentContractAnalysisResult {
   final String fileName;
@@ -42,48 +43,68 @@ class ContractAnalysisService {
 
   ContractAnalysisService(this._apiService);
 
+  MediaType _getMediaType(String fileName) {
+    final ext = fileName.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'pdf': return MediaType('application', 'pdf');
+      case 'doc': return MediaType('application', 'msword');
+      case 'docx': return MediaType('application', 'vnd.openxmlformats-officedocument.wordprocessingml.document');
+      case 'png': return MediaType('image', 'png');
+      case 'jpg':
+      case 'jpeg': return MediaType('image', 'jpeg');
+      case 'txt': return MediaType('text', 'plain');
+      default: return MediaType('application', 'octet-stream');
+    }
+  }
+
   Future<DocumentContractAnalysisResult> analyzeContract({
     required String fileName,
     required Uint8List fileBytes,
   }) async {
     final uri = Uri.parse('${AppConfig.baseUrl}/analyze_contract');
     
-    Future<http.StreamedResponse> sendRequest() async {
-      var request = http.MultipartRequest('POST', uri)
-        ..files.add(http.MultipartFile.fromBytes(
-          'file',
-          fileBytes,
-          filename: fileName,
-        ));
-      
-      // Ensure headers are set if needed for production
-      request.headers.addAll({
-        'Accept': 'application/json',
-      });
-
-      return await request.send().timeout(AppConfig.timeoutDuration);
-    }
-
     int retryCount = 0;
-
     while (true) {
       try {
         if (kDebugMode) {
-          print('Uploading to $uri (Attempt ${retryCount + 1})');
+          print('Uploading $fileName to $uri (Attempt ${retryCount + 1})');
         }
+
+        final request = http.MultipartRequest('POST', uri);
         
-        final response = await sendRequest();
+        // Add file with proper MediaType
+        request.files.add(http.MultipartFile.fromBytes(
+          'file',
+          fileBytes,
+          filename: fileName,
+          contentType: _getMediaType(fileName),
+        ));
+
+        // Add standard headers
+        request.headers.addAll({
+          'Accept': 'application/json',
+        });
+
+        final streamedResponse = await request.send().timeout(AppConfig.timeoutDuration);
+        final response = await http.Response.fromStream(streamedResponse);
 
         if (response.statusCode >= 200 && response.statusCode < 300) {
-          final responseBody = await response.stream.bytesToString();
-          final jsonResponse = json.decode(responseBody);
+          final jsonResponse = json.decode(response.body);
           return DocumentContractAnalysisResult.fromJson(jsonResponse);
         } else {
-          final errorBody = await response.stream.bytesToString();
-          throw ApiException('Server error (${response.statusCode}): $errorBody', statusCode: response.statusCode);
+          throw ApiException(
+            'Server error (${response.statusCode}): ${response.body}',
+            statusCode: response.statusCode
+          );
         }
       } catch (e) {
-        if (retryCount < AppConfig.retryCount && (e is TimeoutException || e is http.ClientException)) {
+        if (kDebugMode) {
+          print('Upload error: $e');
+        }
+
+        bool isNetworkError = e is http.ClientException || e is TimeoutException || e.toString().contains('Failed to fetch');
+        
+        if (retryCount < AppConfig.retryCount && isNetworkError) {
           retryCount++;
           await Future.delayed(AppConfig.retryDelay);
           continue;
@@ -91,6 +112,9 @@ class ContractAnalysisService {
         
         if (e is TimeoutException) {
           throw ApiException('Analysis request timed out. The server might be busy or starting up.');
+        }
+        if (e.toString().contains('Failed to fetch')) {
+          throw ApiException('Connection failed. This might be a CORS issue or the server is down.');
         }
         throw ApiException('Network error: ${e.toString()}');
       }
